@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, ArrowRight } from "lucide-react";
@@ -32,6 +33,7 @@ export const Route = createFileRoute("/checkout")({
 function CheckoutPage() {
   const navigate = useNavigate();
   const { user, loading } = useAuth();
+  const qc = useQueryClient();
   const { course: courseParam } = Route.useSearch();
   const { items, subtotal, removeItem, setQty, clear, addItem } = useCart();
 
@@ -205,6 +207,16 @@ function CheckoutPage() {
             await supabase
               .from("enrollments")
               .upsert(dbCourseEnrollments, { onConflict: "user_id,course_id" });
+
+          if (user?.id) {
+            qc.invalidateQueries({ queryKey: ["my-learning", user.id] });
+            qc.invalidateQueries({ queryKey: ["dashboard", "stats", user.id] });
+            qc.invalidateQueries({ queryKey: ["dashboard", "continue", user.id] });
+            for (const item of courseEnrollments) {
+              qc.invalidateQueries({ queryKey: ["is-enrolled", user.id, item.course_id] });
+            }
+          }
+
           setPlacedOrderId((inserted as { id?: string } | null)?.id ?? orderId);
           clear();
         },

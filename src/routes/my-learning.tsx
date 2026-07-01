@@ -70,16 +70,38 @@ function MyLearningPage() {
   const courses = useMemo(() => q.data ?? [], [q.data]);
 
   // Derived counts
-  const inProgressCount = courses.filter((c) => c.progress > 0 && c.progress < 100).length;
-  const completedCount = courses.filter((c) => c.progress >= 100).length;
-  const notStartedCount = courses.filter((c) => c.progress === 0).length;
+  const inProgressCount = courses.filter((c) => {
+    const pct = c.progress;
+    return pct > 0 && pct < 100;
+  }).length;
+  const completedCount = courses.filter((c) => {
+    const pct = c.progress;
+    return pct >= 100;
+  }).length;
+  const notStartedCount = courses.filter((c) => {
+    const pct = c.progress;
+    return pct === 0;
+  }).length;
 
   // Filter by tab + search
   const filtered = useMemo(() => {
     let list = courses;
-    if (tab === "in-progress") list = list.filter((c) => c.progress > 0 && c.progress < 100);
-    else if (tab === "completed") list = list.filter((c) => c.progress >= 100);
-    else if (tab === "not-started") list = list.filter((c) => c.progress === 0);
+    if (tab === "in-progress") {
+      list = list.filter((c) => {
+        const pct = c.progress;
+        return pct > 0 && pct < 100;
+      });
+    } else if (tab === "completed") {
+      list = list.filter((c) => {
+        const pct = c.progress;
+        return pct >= 100;
+      });
+    } else if (tab === "not-started") {
+      list = list.filter((c) => {
+        const pct = c.progress;
+        return pct === 0;
+      });
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(
@@ -326,8 +348,9 @@ function CourseProgressCard({ c, index }: { c: EnrolledCourse; index: number }) 
   const grad = (c.category && CATEGORY_GRADIENT[c.category]) || "from-primary to-accent";
   const icon = (c.category && CATEGORY_ICON[c.category]) || "📚";
   const levelStyle = (c.level && LEVEL_STYLE[c.level]) || "bg-white/20 text-white border-white/30";
-  const isCompleted = c.progress >= 100;
-  const isStarted = c.progress > 0;
+  const pct = c.progress;
+  const isCompleted = pct >= 100;
+  const isStarted = pct > 0;
   const enrolledDate = c.enrolled_at
     ? new Date(c.enrolled_at).toLocaleDateString("en-IN", {
         day: "numeric",
@@ -427,7 +450,7 @@ function CourseProgressCard({ c, index }: { c: EnrolledCourse; index: number }) 
                 isCompleted ? "text-emerald-600" : "text-primary",
               )}
             >
-              {c.progress}%
+              {pct}%
             </span>
           </div>
 
@@ -435,13 +458,13 @@ function CourseProgressCard({ c, index }: { c: EnrolledCourse; index: number }) 
           <div
             className="h-2 overflow-hidden rounded-full bg-secondary"
             role="progressbar"
-            aria-valuenow={c.progress}
+            aria-valuenow={pct}
             aria-valuemin={0}
             aria-valuemax={100}
           >
             <motion.div
               initial={{ width: 0 }}
-              animate={{ width: `${c.progress}%` }}
+              animate={{ width: `${pct}%` }}
               transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1], delay: index * 0.04 }}
               className={cn(
                 "h-full rounded-full",
@@ -455,7 +478,7 @@ function CourseProgressCard({ c, index }: { c: EnrolledCourse; index: number }) 
             {isCompleted
               ? "🎉 Course complete!"
               : isStarted
-                ? `${100 - c.progress}% left to complete`
+                ? `${100 - pct}% left to complete`
                 : "Not started yet"}
           </p>
 

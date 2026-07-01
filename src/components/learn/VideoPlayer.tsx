@@ -184,6 +184,22 @@ export function VideoPlayer({
     };
   }, []);
 
+  // Save progress on unmount
+  useEffect(() => {
+    return () => {
+      const v = videoRef.current;
+      if (v && onTick) {
+        const dur = v.duration || 0;
+        onTick({
+          current_time_secs: v.currentTime,
+          duration_secs: dur,
+          watch_percentage: dur ? Math.min(100, (v.currentTime / dur) * 100) : 0,
+          time_spent_secs: watchAccumRef.current,
+        });
+      }
+    };
+  }, [onTick]);
+
   const togglePlay = () => {
     const v = videoRef.current;
     if (!v) return;

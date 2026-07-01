@@ -165,8 +165,15 @@ function LessonPlayerPage() {
   useEffect(
     () => () => {
       if (advanceTimer.current) clearInterval(advanceTimer.current);
+      if (user?.id) {
+        setTimeout(() => {
+          qc.invalidateQueries({ queryKey: ["my-learning", user.id] });
+          qc.invalidateQueries({ queryKey: ["dashboard", "continue", user.id] });
+          qc.invalidateQueries({ queryKey: ["dashboard", "stats", user.id] });
+        }, 800);
+      }
     },
-    [],
+    [user?.id, qc],
   );
 
   function cancelAutoAdvance() {
@@ -229,6 +236,9 @@ function LessonPlayerPage() {
         [lesson.id]: { ...(old?.[lesson.id] ?? {}), is_completed: true, watch_percentage: 100 },
       }),
     );
+    qc.invalidateQueries({ queryKey: ["my-learning", user.id] });
+    qc.invalidateQueries({ queryKey: ["dashboard", "continue", user.id] });
+    qc.invalidateQueries({ queryKey: ["dashboard", "stats", user.id] });
     setTimeout(() => setCelebrating(false), 1800);
 
     const autoplayEnabled =
@@ -253,12 +263,11 @@ function LessonPlayerPage() {
           <h2 className="font-display text-2xl font-bold text-foreground">Lesson not found</h2>
           <p className="text-muted-foreground">This lesson could not be loaded.</p>
           <Link
-            to="/course/$id"
-            params={{ id: courseId }}
+            to="/my-learning"
             className="inline-flex items-center gap-2 rounded-lg bg-primary px-6 py-3 text-sm font-semibold text-white hover:bg-primary/90"
           >
             <ArrowLeft className="h-4 w-4" />
-            Back to Course
+            Back to My Learning
           </Link>
         </div>
       </div>
@@ -321,13 +330,12 @@ function LessonPlayerPage() {
               <Menu className="h-4 w-4" />
             </button>
             <Link
-              to="/course/$id"
-              params={{ id: courseId }}
+              to="/my-learning"
               className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-primary/20 bg-primary/5 px-3 text-xs font-semibold text-primary hover:bg-primary hover:text-white transition-all duration-200 shrink-0 shadow-sm"
-              title="Back to course"
+              title="Back to My Learning"
             >
               <ArrowLeft className="h-4 w-4" />
-              <span className="hidden sm:inline">Back to Course</span>
+              <span className="hidden sm:inline">Back to My Learning</span>
             </Link>
             <div className="hidden h-4 w-px bg-border sm:block shrink-0" />
             <div className="flex min-w-0 items-center gap-2.5 text-sm font-medium">

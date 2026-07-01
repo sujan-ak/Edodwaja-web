@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AppSidebar } from "@/components/dashboard/AppSidebar";
@@ -41,6 +41,7 @@ function CourseDetailPage() {
   const { id } = Route.useParams();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const [tab, setTab] = useState<TabKey>("overview");
   const [showSticky, setShowSticky] = useState(false);
   const [enrolling, setEnrolling] = useState(false);
@@ -104,6 +105,11 @@ function CourseDetailPage() {
         setEnrolling(false);
 
         if (res.ok) {
+          qc.invalidateQueries({ queryKey: ["is-enrolled", user.id, course.id] });
+          qc.invalidateQueries({ queryKey: ["my-learning", user.id] });
+          qc.invalidateQueries({ queryKey: ["dashboard", "stats", user.id] });
+          qc.invalidateQueries({ queryKey: ["dashboard", "continue", user.id] });
+
           setEnrolledLocal(true);
           toast.success("Enrolled successfully! 🎉");
           // Small delay to show the success state before redirecting

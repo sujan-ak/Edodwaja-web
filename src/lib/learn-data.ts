@@ -33,25 +33,29 @@ export type LessonProgressRow = {
 };
 
 export async function fetchLesson(courseId: string, lessonId: string): Promise<LessonDetail> {
+  // Demo/fallback courses (used whenever Supabase has no matching row) store
+  // their lessons as static data with non-numeric ids like "l1". Number(lessonId)
+  // would be NaN against the real `lessons` table, so this path always failed
+  // with "Lesson not found" — that's the bug behind "Continue Learning".
   if (courseId.startsWith("demo-")) {
-    for (const m of DEMO_MODULES) {
-      const lesson = m.lessons.find((l) => l.id === lessonId);
-      if (lesson) {
-        return {
-          id: lesson.id,
-          course_id: courseId,
-          module_id: m.id,
-          title: lesson.title,
-          description: "Demo lesson content",
-          video_url: null,
-          content: "This is a demo lesson. Connect your Supabase project and enroll in real courses to see complete lessons, interactive labs, and streaming video content.",
-          notes: "Demo notes",
-          duration_minutes: lesson.duration_minutes,
-          position: lesson.position,
-        };
-      }
-    }
-    throw new Error(`Demo lesson ${lessonId} not found`);
+    const allLessons = DEMO_MODULES.flatMap((m) =>
+      m.lessons.map((l) => ({ ...l, module_id: m.id })),
+    );
+    const lesson = allLessons.find((l) => l.id === lessonId);
+    if (!lesson) throw new Error(`Lesson ${lessonId} not found`);
+    return {
+      id: lesson.id,
+      course_id: courseId,
+      module_id: lesson.module_id,
+      title: lesson.title,
+      description: null,
+      video_url: "https://www.w3schools.com/html/mov_bbb.mp4",
+      content:
+        "This is a demo lesson. Connect a real course in Supabase to replace this placeholder content.",
+      notes: null,
+      duration_minutes: lesson.duration_minutes,
+      position: lesson.position,
+    };
   }
 
   const { data, error } = await supabase
@@ -85,38 +89,26 @@ export async function fetchLesson(courseId: string, lessonId: string): Promise<L
 
 export async function fetchLessonResources(lessonId: string): Promise<LessonResource[]> {
   try {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("lesson_resources")
       .select("id, title, url, type, size_bytes")
       .eq("lesson_id", lessonId);
+
+    // Table doesn't exist yet (404) or other DB error — return empty, no noise
+    if (error) {
+      if (error.code !== "42P01") {
+        // Only log if it's NOT a "table does not exist" error
+        console.warn(`[makersflow] fetchLessonResources error:`, error.message);
+      }
+      return [];
+    }
+
     if (data && data.length) return data as LessonResource[];
   } catch (err) {
-    console.warn(`[makersflow] fetchLessonResources lesson_resources threw, using fallback:`, err);
+    console.warn(`[makersflow] fetchLessonResources threw:`, err);
   }
-  // FIX 1: return statement and opening of array was missing
-  return [
-    {
-      id: "r1",
-      title: "Lesson Slides (PDF)",
-      url: "#",
-      type: "pdf",
-      size_bytes: 1_200_000,
-    },
-    {
-      id: "r2",
-      title: "Source Code Starter",
-      url: "#",
-      type: "zip",
-      size_bytes: 480_000,
-    },
-    {
-      id: "r3",
-      title: "Cheat Sheet",
-      url: "#",
-      type: "pdf",
-      size_bytes: 220_000,
-    },
-  ];
+  // No resources found — return empty array (no fake placeholder resources)
+  return [];
 }
 
 export async function fetchCourseProgressMap(
@@ -185,17 +177,23 @@ export async function upsertLessonProgress(
     const progressPayload = {
       user_id: userId,
       lesson_id: Number(payload.lesson_id),
+      course_id: payload.course_id,
       watch_percentage: Math.round(payload.watch_percentage),
       current_time_secs: Math.floor(payload.current_time_secs),
       is_completed: payload.is_completed ?? false,
       time_spent_secs: Math.floor(payload.time_spent_secs),
       last_watched_at: new Date().toISOString(),
     };
-    await supabase
+    const { error } = await supabase
       .from("lesson_progress")
       .upsert(progressPayload, { onConflict: "user_id,lesson_id" });
+    if (error) {
+      console.error(`[makersflow] upsertLessonProgress upsert failed:`, error);
+      throw error;
+    }
   } catch (err) {
     console.warn(`[makersflow] upsertLessonProgress lesson_progress threw:`, err);
+    throw err;
   }
 }
 
@@ -223,15 +221,21 @@ export async function markLessonComplete(userId: string, courseId: string, lesso
     const completePayload = {
       user_id: userId,
       lesson_id: Number(lessonId),
+      course_id: courseId,
       is_completed: true,
       watch_percentage: 100,
       last_watched_at: new Date().toISOString(),
     };
-    await supabase
+    const { error } = await supabase
       .from("lesson_progress")
       .upsert(completePayload, { onConflict: "user_id,lesson_id" });
+    if (error) {
+      console.error(`[makersflow] markLessonComplete upsert failed:`, error);
+      throw error;
+    }
   } catch (err) {
     console.warn(`[makersflow] markLessonComplete lesson_progress threw:`, err);
+    throw err;
   }
 }
 
@@ -260,6 +264,40 @@ function flattenLessons(modules: Module[]) {
 
 export async function fetchEnrolledCourses(userId: string): Promise<EnrolledCourse[]> {
   console.log("[fetchEnrolledCourses] Fetching enrolled courses for user:", userId);
+
+  const out: EnrolledCourse[] = [];
+
+  // ── Demo/fallback course enrollments (stored client-side in localStorage,
+  // since there's no Supabase row to attach a real `enrollments` record to) ──
+  try {
+    const demoIds: string[] = JSON.parse(
+      localStorage.getItem(`demo_enrollments_${userId}`) || "[]",
+    );
+    for (const courseId of demoIds) {
+      const course = FALLBACK.find((c) => c.id === courseId);
+      if (!course) continue;
+      const flat = flattenLessons(DEMO_MODULES);
+      const progressMap = await fetchCourseProgressMap(userId, courseId);
+      const completed = flat.filter((l) => progressMap[l.id]?.is_completed).length;
+      const total = flat.length;
+      const next = flat.find((l) => !progressMap[l.id]?.is_completed) ?? flat[0];
+      out.push({
+        id: courseId,
+        title: course.title,
+        thumbnail_url: course.thumbnail_url ?? null,
+        category: course.category ?? null,
+        level: course.level ?? null,
+        total_lessons: total,
+        completed_lessons: completed,
+        progress: total ? Math.round((completed / total) * 100) : 0,
+        next_lesson_id: next?.id ?? null,
+        enrolled_at: null,
+        completed_at: completed === total && total > 0 ? new Date().toISOString() : null,
+      });
+    }
+  } catch (err) {
+    console.warn("[fetchEnrolledCourses] Failed to read demo enrollments:", err);
+  }
 
   try {
     // Query enrollments with course data joined
@@ -291,118 +329,80 @@ export async function fetchEnrolledCourses(userId: string): Promise<EnrolledCour
 
     if (enrError) {
       console.error("[fetchEnrolledCourses] Query error:", enrError);
-      return [];
+      return out;
     }
 
-    const out: EnrolledCourse[] = [];
+    if (!enrollments || enrollments.length === 0) {
+      console.log("[fetchEnrolledCourses] No real-course enrollments found");
+      return out;
+    }
 
-    if (enrollments && enrollments.length > 0) {
-      for (const enrollment of enrollments) {
-        const courseData = (enrollment as any).courses;
-        const courseId = String((enrollment as any).course_id);
+    for (const enrollment of enrollments) {
+      const courseData = (enrollment as any).courses;
+      const courseId = String((enrollment as any).course_id);
 
-        // Skip if course data is missing
-        if (!courseData) {
-          console.warn(`[fetchEnrolledCourses] No course data for enrollment:`, courseId);
-          continue;
-        }
+      // Skip if course data is missing
+      if (!courseData) {
+        console.warn(`[fetchEnrolledCourses] No course data for enrollment:`, courseId);
+        continue;
+      }
 
-        console.log(`[fetchEnrolledCourses] Processing course: ${courseId}`);
+      console.log(`[fetchEnrolledCourses] Processing course: ${courseId}`);
 
-        // Fetch modules and lessons for this course
-        let modules: any[] = [];
+      // Fetch modules and lessons for this course
+      let modules: any[] = [];
 
-        const { data: modulesData, error: modulesError } = await supabase
-          .from("modules")
-          .select("id, title, order_index")
-          .eq("course_id", courseId)
+      const { data: modulesData, error: modulesError } = await supabase
+        .from("modules")
+        .select("id, title, order_index")
+        .eq("course_id", courseId)
+        .order("order_index", { ascending: true });
+
+      if (modulesData && !modulesError && modulesData.length > 0) {
+        const moduleIds = modulesData.map((m) => m.id);
+        const { data: lessonsData } = await supabase
+          .from("lessons")
+          .select("id, module_id, title, duration_secs, order_index")
+          .in("module_id", moduleIds)
           .order("order_index", { ascending: true });
 
-        if (modulesData && !modulesError && modulesData.length > 0) {
-          const moduleIds = modulesData.map((m) => m.id);
-          const { data: lessonsData } = await supabase
-            .from("lessons")
-            .select("id, module_id, title, duration_secs, order_index")
-            .in("module_id", moduleIds)
-            .order("order_index", { ascending: true });
-
-          modules = modulesData.map((module: any) => ({
-            id: module.id,
-            title: module.title,
-            position: module.order_index ?? 0,
-            lessons: (lessonsData ?? [])
-              .filter((l) => String((l as any).module_id) === String(module.id))
-              .map((l: any) => ({
-                id: l.id,
-                title: l.title,
-                duration_minutes: l.duration_secs ? Math.round(l.duration_secs / 60) : null,
-                position: l.order_index ?? 0,
-              })),
-          }));
-        }
-
-        const flat = flattenLessons(modules);
-        const progressMap = await fetchCourseProgressMap(userId, courseId);
-        const completed = flat.filter((l) => progressMap[l.id]?.is_completed).length;
-        const total = flat.length;
-        const next = flat.find((l) => !progressMap[l.id]?.is_completed) ?? flat[0];
-
-        console.log(
-          `[fetchEnrolledCourses] Course ${courseId} progress: ${completed}/${total} lessons`,
-        );
-
-        out.push({
-          id: String(courseData.id ?? courseId),
-          title: courseData.title ?? "Untitled Course",
-          thumbnail_url: courseData.thumbnail_url ?? null,
-          category: courseData.category ?? null,
-          level: courseData.level ?? null,
-          total_lessons: total,
-          completed_lessons: completed,
-          progress: total ? Math.round((completed / total) * 100) : 0,
-          next_lesson_id: next?.id ?? null,
-          enrolled_at: (enrollment as any).enrolled_at,
-          completed_at: (enrollment as any).completed_at,
-        });
+        modules = modulesData.map((module: any) => ({
+          id: module.id,
+          title: module.title,
+          position: module.order_index ?? 0,
+          lessons: (lessonsData ?? [])
+            .filter((l) => String((l as any).module_id) === String(module.id))
+            .map((l: any) => ({
+              id: l.id,
+              title: l.title,
+              duration_minutes: l.duration_secs ? Math.round(l.duration_secs / 60) : null,
+              position: l.order_index ?? 0,
+            })),
+        }));
       }
-    }
 
-    // Check localStorage for demo enrollments
-    let demoCourseIds: string[] = [];
-    if (typeof localStorage !== "undefined") {
-      try {
-        demoCourseIds = JSON.parse(localStorage.getItem(`demo_enrollments_${userId}`) || "[]");
-      } catch (e) {
-        console.warn("[fetchEnrolledCourses] Error reading demo enrollments:", e);
-      }
-    }
-
-    for (const demoId of demoCourseIds) {
-      const courseData = FALLBACK.find((c) => c.id === demoId);
-      console.log(`[fetchEnrolledCourses] Processing demo course: ${demoId}`);
-
-      const flat = flattenLessons(DEMO_MODULES);
-      const progressMap = await fetchCourseProgressMap(userId, demoId);
+      const flat = flattenLessons(modules);
+      const progressMap = await fetchCourseProgressMap(userId, courseId);
       const completed = flat.filter((l) => progressMap[l.id]?.is_completed).length;
       const total = flat.length;
       const next = flat.find((l) => !progressMap[l.id]?.is_completed) ?? flat[0];
 
       console.log(
-        `[fetchEnrolledCourses] Demo Course ${demoId} progress: ${completed}/${total} lessons`,
+        `[fetchEnrolledCourses] Course ${courseId} progress: ${completed}/${total} lessons`,
       );
 
       out.push({
-        id: demoId,
-        title: courseData?.title ?? "Demo Course",
-        thumbnail_url: courseData?.thumbnail_url ?? null,
-        category: courseData?.category ?? null,
-        level: courseData?.level ?? null,
+        id: String(courseData.id ?? courseId),
+        title: courseData.title ?? "Untitled Course",
+        thumbnail_url: courseData.thumbnail_url ?? null,
+        category: courseData.category ?? null,
+        level: courseData.level ?? null,
         total_lessons: total,
         completed_lessons: completed,
         progress: total ? Math.round((completed / total) * 100) : 0,
         next_lesson_id: next?.id ?? null,
-        enrolled_at: new Date().toISOString(),
-        completed_at: null,
+        enrolled_at: (enrollment as any).enrolled_at,
+        completed_at: (enrollment as any).completed_at,
       });
     }
 
@@ -410,7 +410,7 @@ export async function fetchEnrolledCourses(userId: string): Promise<EnrolledCour
     return out;
   } catch (err) {
     console.error(`[fetchEnrolledCourses] Exception:`, err);
-    return [];
+    return out;
   }
 }
 

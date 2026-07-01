@@ -18,10 +18,6 @@ import {
   fetchRecommended,
   fetchWeeklyActivity,
   fetchAchievements,
-  DEMO_STATS,
-  DEMO_STREAK,
-  DEMO_CONTINUE,
-  DEMO_WEEKLY,
 } from "@/lib/dashboard-data";
 
 export const Route = createFileRoute("/dashboard")({
@@ -68,10 +64,18 @@ function DashboardPage() {
   });
 
   const profile = profileQ.data ?? null;
-  const stats = statsQ.data?.enrolled || statsQ.data?.avgProgress ? statsQ.data! : DEMO_STATS;
-  const streak = streakQ.data?.current_streak ? streakQ.data! : DEMO_STREAK;
-  const continueLesson = continueQ.data ?? DEMO_CONTINUE;
-  const weekly = weeklyQ.data?.some((d) => d.count > 0) ? weeklyQ.data! : DEMO_WEEKLY;
+  const stats = statsQ.data ?? { enrolled: 0, completed: 0, avgProgress: 0, totalHours: 0 };
+  const streak = streakQ.data ?? { current_streak: 0, longest_streak: 0 };
+  const continueLesson = continueQ.data ?? null;
+  const weekly = weeklyQ.data ?? [
+    { day: "Mon", date: "", count: 0, isToday: false },
+    { day: "Tue", date: "", count: 0, isToday: false },
+    { day: "Wed", date: "", count: 0, isToday: false },
+    { day: "Thu", date: "", count: 0, isToday: false },
+    { day: "Fri", date: "", count: 0, isToday: false },
+    { day: "Sat", date: "", count: 0, isToday: false },
+    { day: "Sun", date: "", count: 0, isToday: false },
+  ];
   const achievements = fetchAchievements(stats, streak);
 
   const firstName = (
